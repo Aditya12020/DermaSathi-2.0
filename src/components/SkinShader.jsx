@@ -5,7 +5,15 @@ export default function SkinShader({ className = "" }) {
 
   useEffect(() => {
     const canvas = ref.current;
-    const gl = canvas?.getContext("webgl");
+
+    if (!canvas) return;
+
+    const gl =
+      canvas.getContext("webgl", {
+        antialias: false,
+        alpha: true,
+        powerPreference: "high-performance",
+      }) || canvas.getContext("experimental-webgl");
 
     if (!gl) return;
 
@@ -85,31 +93,63 @@ export default function SkinShader({ className = "" }) {
     `;
 
     const compile = (type, src) => {
-      const s = gl.createShader(type);
+      const shader = gl.createShader(type);
 
-      gl.shaderSource(s, src);
-      gl.compileShader(s);
+      if (!shader) return null;
 
-      return s;
+      gl.shaderSource(shader, src);
+      gl.compileShader(shader);
+
+      if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error(
+          "SkinShader compile error:",
+          gl.getShaderInfoLog(shader)
+        );
+
+        gl.deleteShader(shader);
+        return null;
+      }
+
+      return shader;
     };
 
-    const p = gl.createProgram();
+    const vertexShader = compile(gl.VERTEX_SHADER, vs);
+    const fragmentShader = compile(gl.FRAGMENT_SHADER, fs);
 
-    gl.attachShader(
-      p,
-      compile(gl.VERTEX_SHADER, vs)
-    );
+    if (!vertexShader || !fragmentShader) return;
 
-    gl.attachShader(
-      p,
-      compile(gl.FRAGMENT_SHADER, fs)
-    );
+    const program = gl.createProgram();
 
-    gl.linkProgram(p);
+    if (!program) return;
 
-    const buf = gl.createBuffer();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
 
-    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      console.error(
+        "SkinShader program link error:",
+        gl.getProgramInfoLog(program)
+      );
+
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+
+      return;
+    }
+
+    const buffer = gl.createBuffer();
+
+    if (!buffer) {
+      gl.deleteProgram(program);
+      gl.deleteShader(vertexShader);
+      gl.deleteShader(fragmentShader);
+
+      return;
+    }
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
 
     gl.bufferData(
       gl.ARRAY_BUFFER,
@@ -124,38 +164,82 @@ export default function SkinShader({ className = "" }) {
       gl.STATIC_DRAW
     );
 
-    const loc = gl.getAttribLocation(p, "p");
-    const t = gl.getUniformLocation(p, "t");
-    const r = gl.getUniformLocation(p, "r");
-    const m = gl.getUniformLocation(p, "m");
+    const positionLocation = gl.getAttribLocation(
+      program,
+      "p"
+    );
+
+    const timeLocation = gl.getUniformLocation(
+      program,
+      "t"
+    );
+
+    const resolutionLocation = gl.getUniformLocation(
+      program,
+      "r"
+    );
+
+    const mouseLocation = gl.getUniformLocation(
+      program,
+      "m"
+    );
 
     let mx = 0;
     let my = 0;
-    let raf;
+    let raf = null;
+
+    let isVisible = true;
+    let isRunning = false;
+    let destroyed = false;
 
     const resize = () => {
-      const d = Math.min(devicePixelRatio, 2);
-      const w = canvas.clientWidth * d;
-      const h = canvas.clientHeight * d;
+      if (destroyed) return;
 
-      if (canvas.width !== w || canvas.height !== h) {
-        canvas.width = w;
-        canvas.height = h;
+      const d = Math.min(window.devicePixelRatio || 1, 1.5);
+
+      const width = Math.floor(
+        canvas.clientWidth * d
+      );
+
+      const height = Math.floor(
+        canvas.clientHeight * d
+      );
+
+      if (
+        width > 0 &&
+        height > 0 &&
+        (canvas.width !== width ||
+          canvas.height !== height)
+      ) {
+        canvas.width = width;
+        canvas.height = height;
       }
     };
 
     const move = (e) => {
+      if (!isVisible) return;
+
       const b = canvas.getBoundingClientRect();
 
-      mx = (e.clientX - b.left) / b.width - 0.5;
-      my = 0.5 - (e.clientY - b.top) / b.height;
-    };
+      if (!b.width || !b.height) return;
 
-    canvas.addEventListener("pointermove", move);
+      mx =
+        (e.clientX - b.left) / b.width - 0.5;
+
+      my =
+        0.5 -
+        (e.clientY - b.top) / b.height;
+    };
 
     const start = performance.now();
 
     const draw = (now) => {
+      if (destroyed || !isVisible) {
+        isRunning = false;
+        raf = null;
+        return;
+      }
+
       resize();
 
       gl.viewport(
@@ -168,14 +252,19 @@ export default function SkinShader({ className = "" }) {
       gl.clearColor(0, 0, 0, 0);
       gl.clear(gl.COLOR_BUFFER_BIT);
 
-      gl.useProgram(p);
+      gl.useProgram(program);
 
-      gl.enableVertexAttribArray(loc);
+      gl.bindBuffer(
+        gl.ARRAY_BUFFER,
+        buffer
+      );
 
-      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      gl.enableVertexAttribArray(
+        positionLocation
+      );
 
       gl.vertexAttribPointer(
-        loc,
+        positionLocation,
         2,
         gl.FLOAT,
         false,
@@ -184,17 +273,21 @@ export default function SkinShader({ className = "" }) {
       );
 
       gl.uniform1f(
-        t,
+        timeLocation,
         (now - start) / 1000
       );
 
       gl.uniform2f(
-        r,
+        resolutionLocation,
         canvas.width,
         canvas.height
       );
 
-      gl.uniform2f(m, mx, my);
+      gl.uniform2f(
+        mouseLocation,
+        mx,
+        my
+      );
 
       gl.drawArrays(
         gl.TRIANGLES,
@@ -205,12 +298,66 @@ export default function SkinShader({ className = "" }) {
       raf = requestAnimationFrame(draw);
     };
 
-    raf = requestAnimationFrame(draw);
+    const startRendering = () => {
+      if (
+        destroyed ||
+        !isVisible ||
+        isRunning
+      ) {
+        return;
+      }
 
-    window.addEventListener("resize", resize);
+      isRunning = true;
+      raf = requestAnimationFrame(draw);
+    };
+
+    const stopRendering = () => {
+      if (raf !== null) {
+        cancelAnimationFrame(raf);
+        raf = null;
+      }
+
+      isRunning = false;
+    };
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        isVisible = entry.isIntersecting;
+
+        if (isVisible) {
+          resize();
+          startRendering();
+        } else {
+          stopRendering();
+        }
+      },
+      {
+        threshold: 0.01,
+      }
+    );
+
+    observer.observe(canvas);
+
+    canvas.addEventListener(
+      "pointermove",
+      move
+    );
+
+    window.addEventListener(
+      "resize",
+      resize
+    );
+
+    resize();
+
+    startRendering();
 
     return () => {
-      cancelAnimationFrame(raf);
+      destroyed = true;
+
+      stopRendering();
+
+      observer.disconnect();
 
       canvas.removeEventListener(
         "pointermove",
@@ -221,6 +368,22 @@ export default function SkinShader({ className = "" }) {
         "resize",
         resize
       );
+
+      if (buffer) {
+        gl.deleteBuffer(buffer);
+      }
+
+      if (program) {
+        gl.deleteProgram(program);
+      }
+
+      if (vertexShader) {
+        gl.deleteShader(vertexShader);
+      }
+
+      if (fragmentShader) {
+        gl.deleteShader(fragmentShader);
+      }
     };
   }, []);
 

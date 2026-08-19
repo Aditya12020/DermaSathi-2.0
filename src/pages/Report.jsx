@@ -5,7 +5,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 
-export default function Report() {
+export default function Report({ preview }) {
   const [layer, setLayer] = useState("Texture");
 
   const layers = [
@@ -52,7 +52,15 @@ export default function Report() {
           </div>
 
           <div className="map-art">
-            <div className="face-shape" />
+            {preview ? (
+              <img
+                src={preview}
+                alt="Uploaded skin"
+                className="report-skin-image"
+              />
+            ) : (
+              <div className="face-shape" />
+            )}
 
             <div className="map-point p1">A</div>
 

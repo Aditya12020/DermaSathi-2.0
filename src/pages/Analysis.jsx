@@ -3,12 +3,12 @@ import {
   Check,
   Upload,
   ScanLine,
-  Image as ImageIcon,
   ArrowRight,
 } from "lucide-react";
 
-export default function Analysis({ setPage }) {
+export default function Analysis({ setPage, setPreview }) {
   const [file, setFile] = useState(null);
+  const [previewUrl, setPreviewUrl] = useState(null);
   const [running, setRunning] = useState(false);
   const [step, setStep] = useState(0);
 
@@ -20,10 +20,33 @@ export default function Analysis({ setPage }) {
     "Insight generation",
   ];
 
+  const handleImage = (e) => {
+    const selectedFile = e.target.files?.[0];
+
+    if (!selectedFile) return;
+
+    if (selectedFile.size > 10 * 1024 * 1024) {
+      alert("Please select an image smaller than 10MB.");
+      return;
+    }
+
+    const newPreviewUrl = URL.createObjectURL(selectedFile);
+
+    setFile(selectedFile);
+    setPreviewUrl(newPreviewUrl);
+
+    // Send image URL to App.jsx
+    setPreview(newPreviewUrl);
+
+    setStep(0);
+    setRunning(false);
+  };
+
   const start = () => {
     if (!file) return;
 
     setRunning(true);
+    setStep(0);
 
     let i = 0;
 
@@ -68,7 +91,8 @@ export default function Analysis({ setPage }) {
             <>
               <img
                 className="uploaded"
-                src={URL.createObjectURL(file)}
+                src={previewUrl}
+                alt="Uploaded skin"
               />
 
               {running && <div className="scan-line" />}
@@ -90,9 +114,7 @@ export default function Analysis({ setPage }) {
                   type="file"
                   accept="image/*"
                   hidden
-                  onChange={(e) =>
-                    setFile(e.target.files?.[0])
-                  }
+                  onChange={handleImage}
                 />
               </label>
             </div>
